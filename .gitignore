@@ -1,0 +1,21 @@
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+
+# data / models
+data/
+!data/raw/
+!data/raw/.gitkeep
+models/
+!models/.gitkeep
+
+# notebooks
+.ipynb_checkpoints/
+
+# OS/IDE
+.vscode/
+.DS_Store
+
