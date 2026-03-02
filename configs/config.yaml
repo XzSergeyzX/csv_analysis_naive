@@ -1,10 +1,7 @@
 train_path: data/processed/train.csv
 test_path: data/processed/test.csv
-
 target: label
 text_col: text
-
 model_path: models/spam_tfidf_lr.joblib
-threshold: 0.495
-max_fp_per_1000: 1
 seed: 42
+threshold: 0.495

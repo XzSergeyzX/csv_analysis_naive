@@ -17,25 +17,20 @@ def load_config(path: str) -> dict:
         return yaml.safe_load(f)
 
 
-def pick_threshold(spam_proba: np.ndarray, y_true: np.ndarray, max_fp_per_1000: float) -> float:
+def pick_threshold_zero_fp(spam_proba: np.ndarray, y_true: np.ndarray) -> float:
     ham_mask = (y_true == "ham")
-    spam_mask = (y_true == "spam")
-
-    max_fpr = max_fp_per_1000 / 1000.0
-
     thresholds = np.unique(spam_proba)
     thresholds.sort()
 
-    best_t = float(thresholds[0])
+    # минимальный порог, при котором FP=0
     for t in thresholds:
         pred_spam = spam_proba >= t
         fp = int(np.sum(pred_spam & ham_mask))
-        tn = int(np.sum((~pred_spam) & ham_mask))
-        fpr = fp / max(1, (fp + tn))
-        if fpr <= max_fpr:
-            best_t = float(t)
-            break
-    return best_t
+        if fp == 0:
+            return float(t)
+
+    # фолбэк: никого не помечать как spam
+    return 1.0
 
 
 def proba_and_pred(model: Pipeline, texts: pd.Series, threshold: float):
@@ -57,13 +52,13 @@ def main(config_path: str):
     text_col = cfg["text_col"]
     target_col = cfg["target"]
 
-    X_train_full = train_df[text_col]
+    X_train_full = train_df[text_col].astype(str)
     y_train_full = train_df[target_col].astype(str).to_numpy()
 
-    X_test = test_df[text_col]
+    X_test = test_df[text_col].astype(str)
     y_test = test_df[target_col].astype(str).to_numpy()
 
-    # внутренняя валидация для подбора порога (test не трогаем)
+    # внутренняя валидация (test не трогаем)
     X_sub, X_val, y_sub, y_val = train_test_split(
         X_train_full,
         y_train_full,
@@ -72,8 +67,6 @@ def main(config_path: str):
         stratify=y_train_full,
     )
 
-
-
     model = Pipeline(
         steps=[
             ("tfidf", TfidfVectorizer(lowercase=True, stop_words="english")),
@@ -81,28 +74,31 @@ def main(config_path: str):
         ]
     )
 
-    model.fit(X_sub.astype(str), y_sub)
+    # 1) обучили на sub
+    model.fit(X_sub, y_sub)
 
-    # подобрать threshold по val под FP/1000 <= 1
-    max_fp_per_1000 = float(cfg.get("max_fp_per_1000", 1.0))
-    val_proba, _ = proba_and_pred(model, X_val, threshold=0.0)
-    threshold = pick_threshold(val_proba, y_val, max_fp_per_1000=max_fp_per_1000)
-
-    # финально переобучаем на ВСЁМ train
-    model.fit(X_train_full.astype(str), y_train_full)
-
+    # 2) threshold: либо фикс из конфига, либо zero-fp на val
     if "threshold" in cfg:
         threshold = float(cfg["threshold"])
+        print(f"Using fixed threshold from config: {threshold:.6f}")
+    else:
+        val_proba, _ = proba_and_pred(model, X_val, threshold=0.0)
+        threshold = pick_threshold_zero_fp(val_proba, y_val)
+        print(f"Chosen threshold (zero FP on val): {threshold:.6f}")
+        print(f"Recommended to add to config.yaml: threshold: {threshold:.6f}")
 
-    # оценка на test
-    test_proba, test_pred = proba_and_pred(model, X_test, threshold=threshold)
+    # 3) финально переобучаем на ВСЁМ train
+    model.fit(X_train_full, y_train_full)
+
+    # 4) оценка на test
+    _, test_pred = proba_and_pred(model, X_test, threshold=threshold)
 
     cm = confusion_matrix(y_test, test_pred, labels=["ham", "spam"])
     tn, fp, fn, tp = cm.ravel()
+
     fp_per_1000 = (fp / max(1, (fp + tn))) * 1000.0
     recall_spam = tp / max(1, (tp + fn))
 
-    print(f"Chosen threshold (from val): {threshold:.6f} | constraint FP/1000 <= {max_fp_per_1000}")
     print("TEST confusion matrix labels=['ham','spam']:")
     print(cm)
     print(f"TEST FP={fp} FN={fn} TP={tp} TN={tn} | FP/1000={fp_per_1000:.3f} | recall_spam={recall_spam:.4f}")
@@ -114,9 +110,6 @@ def main(config_path: str):
     model_path.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump(model, model_path)
     print(f"Saved model: {model_path}")
-
-    # опционально: записать threshold обратно в config (руками решай)
-    print("Using fixed threshold from config")
 
 
 if __name__ == "__main__":
