@@ -5,17 +5,18 @@ __pycache__/
 venv/
 .env
 
-# data / models
-data/
+# ignore generated artifacts but keep folders
+data/**
 !data/raw/
 !data/raw/.gitkeep
-models/
+!data/processed/
+!data/processed/.gitkeep
+!data/out/
+!data/out/.gitkeep
+
+models/**
 !models/.gitkeep
 
-# notebooks
-.ipynb_checkpoints/
-
-# OS/IDE
+# IDE
 .vscode/
 .DS_Store
-
