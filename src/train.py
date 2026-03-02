@@ -1,49 +1,71 @@
 import argparse
+from pathlib import Path
 import yaml
 import pandas as pd
+
 from sklearn.model_selection import train_test_split
+from sklearn.pipeline import Pipeline
+from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import classification_report, confusion_matrix
 import joblib
-from pathlib import Path
 
 
-def load_config(path):
-    with open(path, "r") as f:
+def load_config(path: str) -> dict:
+    with open(path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
-def main(config_path):
-    config = load_config(config_path)
+def main(config_path: str):
+    cfg = load_config(config_path)
 
-    data_path = config["data_path"]
-    target_col = config["target"]
-    model_path = config["model_path"]
+    df = pd.read_csv(cfg["processed_path"])
+    text_col = cfg["text_col"]
+    target_col = cfg["target"]
 
-    df = pd.read_csv(data_path)
-
-    X = df.drop(columns=[target_col])
-    y = df[target_col]
+    X = df[text_col].astype(str)
+    y = df[target_col].astype(str)
 
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.2, random_state=42
+        X, y,
+        test_size=0.2,
+        random_state=42,
+        stratify=y
     )
 
-    model = LogisticRegression(max_iter=1000)
-    model.fit(X_train, y_train)
+    pipeline = Pipeline(
+        steps=[
+            ("tfidf", TfidfVectorizer(lowercase=True, stop_words="english")),
+            ("clf", LogisticRegression(max_iter=1000)),
+        ]
+    )
 
-    preds = model.predict(X_test)
-    acc = accuracy_score(y_test, preds)
+    pipeline.fit(X_train, y_train)
+    # после pipeline.fit(...)
+    proba = pipeline.predict_proba(X_test)
+    # столбец вероятности класса "spam"
+    spam_idx = list(pipeline.named_steps["clf"].classes_).index("spam")
+    spam_proba = proba[:, spam_idx]
 
-    print(f"Accuracy: {acc:.4f}")
+    threshold = float(cfg.get("threshold", 0.5))
+    preds = ["spam" if p >= threshold else "ham" for p in spam_proba]
 
-    Path(model_path).parent.mkdir(parents=True, exist_ok=True)
-    joblib.dump(model, model_path)
+    cm = confusion_matrix(y_test, preds, labels=["ham", "spam"])
+    tn, fp, fn, tp = cm.ravel()
+    print(f"threshold={threshold}")
+    print(cm)
+    print(f"FP={fp} FN={fn} TP={tp} TN={tn}")
+    print()
+    print(classification_report(y_test, preds, digits=4))
+
+    model_path = Path(cfg["model_path"])
+    model_path.parent.mkdir(parents=True, exist_ok=True)
+    joblib.dump(pipeline, model_path)
+    print(f"Saved model: {model_path}")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--config", required=True)
-    args = parser.parse_args()
-
+    p = argparse.ArgumentParser()
+    p.add_argument("--config", required=True)
+    args = p.parse_args()
     main(args.config)

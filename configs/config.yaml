@@ -1,3 +1,12 @@
-data_path: data/raw/sample.csv
-target: target
-model_path: models/model.joblib
+# data_path: data/raw/sample.csv
+# target: target
+# model_path: models/model.joblib
+raw_path: data/raw/sms_spam_collection.txt
+processed_path: data/processed/sms_spam.csv
+
+target: label
+text_col: text
+
+model_path: models/spam_tfidf_lr.joblib
+threshold: 0.49358
+max_fp_per_1000: 1
